@@ -1,0 +1,87 @@
+---
+title: "Group Project"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We first plot the data and its acf:
+```{r}
+data =read.csv("HistoricalQuotes.csv", header = TRUE)
+ClosePrice = as.ts(as.numeric(gsub('[$]','',data$Close.Last)))
+plot(ClosePrice,main = "Daily close price of P&G")
+acf(ClosePrice,lag.max="252",main ="Autocorrelation function of the raw data")
+```
+
+The plot shows that the series has an overall decreasing trend after appproximately the $30^{th}$ observation. The acf also decreases very slowly, which also suggests that the series has a trend. Hence, we try differencing the data to make it stationary:
+
+```{r}
+diffClosePrice = diff(ClosePrice,lag=1)
+plot(diffClosePrice,main = "First differenced Close Price data")
+acf(diffClosePrice,lag.max=50,main ="Autocorrelation function of the differenced data")
+pacf(diffClosePrice, main = "partial autocorrelation function of the first differenced data")
+```
+
+The plot suggests that the new series might be stationary because the mean value is about constant so that there is no trend, and it also does not have any seasonal effect. Nevertheless, there are some extreme values at the beginning of the series. This corresponds to the sudden increase of the stock price in our raw data. Since acf does not decay slowly this time, the new series looks staionary. The acf is significant at lags less than 10 and is the most significant at lag 7. The pacf plot is significant at lags less than 8.
+
+We then decided to fit an ARMA model to our stationary series. We selected three models by trial and error and by looking at the diagnostic plots, plus the principle of parsimony. Since all models with $p+q<7$ have three or more significant Ljung-Box statistics, we eventually chose three possible models with $p+q=7$.
+
+```{r}
+ar7=arima(diffClosePrice,order = c(7,0,0))
+arma61=arima(diffClosePrice,order = c(6,0,1))
+arma16=arima(diffClosePrice,order = c(1,0,6))
+tsdiag(ar7)
+tsdiag(arma61)
+tsdiag(arma16)
+```
+
+We saw that all the p-values are not significant in these models; most acf's are not significant; and most of the standardized residuals are within the range $\pm2$. Notice that some residuals at the beginning of the plots are significant, but this corresponds to the sudden increase of our raw data, and therefore poorly fitted values might be expected. Since all these three models fit our data pretty good, we decided to split our data into a training set and a test set to choose the best one.
+
+```{r}
+m=18
+train<- 1:(length(diffClosePrice)-m)
+trainx<- diffClosePrice[train]
+testx<- diffClosePrice[-train]
+foremodel7 = predict(ar7, m)
+foremodel61 = predict(arma61, m)
+foremodel16 = predict(arma16, m)
+sum((testx - foremodel7$pred)^2)
+sum((testx - foremodel61$pred)^2)
+sum((testx - foremodel16$pred)^2)
+```
+
+We notice that the error in the ARMA(6,1) model is the smallest. Hence, our model is: 
+$X(t)+0.0393=-0.8938*(X(t-1)+0.0393)-0.2109*(X(t-2)+0.0393)-0.1711*(X(t-3)+0.0393)-0.3659*(X(t-4)+0.0393)-0.3628*(X(t-5)+0.0393)-0.3066*(X(t-6)+0.0393)+0.7130*Z(t-1)+Z(t)$ where $X(t)$ represents the difference in the close price of P&G company, and $Z(t)$ is the white noise process with estimated variance $4.09$.
+
+```{r}
+arma61
+```
+
+
+At last, we double check that the residuals of our model indeed follows a white noise process by using the portmanteau lack-of-fit test.
+```{r}
+N = length(arma61$residuals)
+M1 = 15
+M2 = 25
+M3 = 30
+rho = acf(arma61$residuals,lag = 50,plot = F)$acf
+Q1 = 200*sum(rho[2:(M1+1)]**2)
+Q2 = 200*sum(rho[2:(M2+1)]**2)
+Q3 = 200*sum(rho[2:(M3+1)]**2)
+pchisq(Q1,M1,ncp=0,lower.tail=F)
+pchisq(Q2,M2,ncp=0,lower.tail=F)
+pchisq(Q3,M3,ncp=0,lower.tail=F)
+```
+It turns out that none of the p-values is significant, so we do not have enough evidence to reject the null hypothesis that the residuals are not from the white noise process in 5% significance level.
+
+We could also predict next week's (beginning at April 4th) stock prices:
+```{r}
+pred=predict(arma61,n.ahead = 7)
+cumsum(pred$pred)+ClosePrice[length(ClosePrice)]
+```
+
